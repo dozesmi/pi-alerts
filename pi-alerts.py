@@ -17,18 +17,31 @@ Last Updated Thu Jul 18 2020
 import json
 import requests
 import time
+from twilio.rest import Client
+from collections import defaultdict
 
 FEED = 'feed.json'
 URL = "https://www.predictit.org/api/marketdata/all"
+
+#Change these based on your twilio number and your phone number
+SENDING_NUMBER = '+1xxxxxxxxxx'
+RECEIVING_NUMBER = '+1xxxxxxxxxx'
+
+#minutes between redundant updates
+COOLDOWN = 30
+
+price_dict = {}
+cooldown_dict = {}
 
 def download():
     response = requests.get(URL)
     with open(FEED, 'wb') as f: 
         f.write(response.content) 
         
-def findNegativeRisk():
+def find_negative_risk():
     f = open(FEED,encoding="utf8")
     data = json.load(f)
+    global cooldown_dict
     
     for item in data['markets']:
         payout = 0
@@ -36,21 +49,30 @@ def findNegativeRisk():
             if(contract['bestBuyNoCost'] != None):
                 payout += 1-float(contract['bestBuyNoCost'])
             
-        if(payout > 1.08):
+        if(payout >= 1.09):
             print("************")
             print(item['name'])
             print("{:.2f}".format(payout))
+        if(payout >= 1.13 and cooldown_dict[item['name']] >= COOLDOWN):
+            client.messages.create(from_=SENDING_NUMBER,
+                       to=RECEIVING_NUMBER,
+                       body=item['shortName'] + " - " + "{:.2f}".format(payout))
+            cooldown_dict.update({item['name'] : 0})
+
+        cooldown_dict.update({item['name'] : min(30, cooldown_dict[item['name']] + 1)})
     
 def loop():
-    
     starttime = time.time()
     while True:
         print("============")
         download()
-        findNegativeRisk()
+        find_negative_risk()
         time.sleep(60.0 - ((time.time() - starttime) % 60.0))
-
+        
 
 if __name__ == '__main__':
+    global client
+    client = Client()
+    cooldown_dict = defaultdict(lambda:COOLDOWN,cooldown_dict)
     loop()
     
