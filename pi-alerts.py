@@ -27,22 +27,47 @@ URL = "https://www.predictit.org/api/marketdata/all"
 SENDING_NUMBER = '+1xxxxxxxxxx'
 RECEIVING_NUMBER = '+1xxxxxxxxxx'
 
-#minutes between redundant updates
+#minutes between redundant notifications
 COOLDOWN = 30
 
-price_dict = {}
 cooldown_dict = {}
+
+#enter alerts here for now, will be parsed from a config file later
+alert_dict = {"NY-16 Dem. primary margin of victory?" : {"12% to 14%" : {"option": "bestBuyYesCost", "direction" : ">", "price" : 0.99, "triggered" : False},
+                                                         "14% to 16%" : {"option": "bestBuyNoCost", "direction" : "<", "price" : 0.00, "triggered" : False}}}
 
 def download():
     response = requests.get(URL)
     with open(FEED, 'wb') as f: 
-        f.write(response.content) 
+        f.write(response.content)
         
+
+def check_price_alerts():
+    global data
+    for item in data['markets']:
+        if(item['shortName'] in alert_dict):
+            for contract in item['contracts']:
+                if(contract['shortName'] in alert_dict[item['shortName']]):
+                    alert = alert_dict[item['shortName']][contract['shortName']]
+                    message = "Check " + item['shortName'] + " " + contract['shortName']
+                    #print(alert_spec)
+                    if(alert['direction'] == "<" and alert['triggered'] == False):
+                        if (float(contract[alert['option']]) < alert['price']):
+                            client.messages.create(from_=SENDING_NUMBER,
+                               to=RECEIVING_NUMBER,
+                               body=message)
+                            alert['triggered'] = True
+                    if(alert['direction'] == ">" and alert['triggered'] == False):
+                        if (float(contract[alert['option']]) > alert['price']):
+                            client.messages.create(from_=SENDING_NUMBER,
+                               to=RECEIVING_NUMBER,
+                               body=message)
+                            alert['triggered'] = True
+                    
+                        
 def find_negative_risk():
-    f = open(FEED,encoding="utf8")
-    data = json.load(f)
     global cooldown_dict
-    
+    global data
     for item in data['markets']:
         payout = 0
         for contract in  item['contracts']:
@@ -59,20 +84,27 @@ def find_negative_risk():
                        body=item['shortName'] + " - " + "{:.2f}".format(payout))
             cooldown_dict.update({item['name'] : 0})
 
-        cooldown_dict.update({item['name'] : min(30, cooldown_dict[item['name']] + 1)})
+        cooldown_dict.update({item['name'] : min(COOLDOWN, cooldown_dict[item['name']] + 1)})
     
 def loop():
     starttime = time.time()
+    global alert_triggered
+    
     while True:
         print("============")
         download()
         find_negative_risk()
+        check_price_alerts()
         time.sleep(60.0 - ((time.time() - starttime) % 60.0))
         
 
 if __name__ == '__main__':
     global client
+    global data
+    
     client = Client()
+    f = open(FEED,encoding="utf8")
+    data = json.load(f)
     cooldown_dict = defaultdict(lambda:COOLDOWN,cooldown_dict)
     loop()
     
